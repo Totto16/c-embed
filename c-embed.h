@@ -46,7 +46,16 @@ typedef struct EFILE_S EFILE;
 
 // Error Handling
 
-__thread int eerrcode = 0;
+#if defined(__UEFI__)
+#define THREAD_LOCAL
+#else
+#define THREAD_LOCAL __thread
+#endif
+
+
+THREAD_LOCAL int eerrcode = 0;
+
+
 #define ethrow(err) { (eerrcode = (err)); return NULL; }
 #define eerrno (eerrcode)
 
