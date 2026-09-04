@@ -84,7 +84,7 @@ static void cembed(const char *const filename, const char *root_dir,
   FILE *file = fopen(filename, "rb"); // Open the Embed Target File
   if (file == NULL) {
     printf("Failed to open file %s.", filename);
-    return;
+    exit(4);
   }
   u_int32_t filename_hash = hash(filename);
 
