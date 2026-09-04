@@ -11,15 +11,72 @@
 #define CEMBED_BUILD
 
 #include "c-embed.h"
+#include <assert.h>
 #include <dirent.h>
 #include <stdbool.h>
 #include <string.h>
 
 typedef struct {
+  size_t size;
+  size_t capacity;
+  u_int32_t *items;
+} HashVec;
+
+#define INITIAL_VEC_CAPACITY 8
+#define VEC_CAPACITY_MULT 2
+
+static void hash_vec_init(HashVec *vec) {
+
+  u_int32_t *items = malloc(sizeof(u_int32_t) * INITIAL_VEC_CAPACITY);
+
+  assert(items != NULL);
+
+  *vec = (HashVec){.size = 0, .capacity = INITIAL_VEC_CAPACITY, .items = items};
+}
+
+static void hash_vec_destroy(HashVec *vec) { free(vec->items); }
+
+static void hash_vec_add(HashVec *vec, u_int32_t item) {
+
+  if (vec->size == vec->capacity) {
+    size_t new_capacity = vec->capacity * VEC_CAPACITY_MULT;
+    u_int32_t *new_items =
+        realloc(vec->items, sizeof(u_int32_t) * new_capacity);
+
+    assert(new_items != NULL);
+
+    vec->capacity = new_capacity;
+    vec->items = new_items;
+  }
+
+  vec->items[vec->size] = item;
+
+  ++(vec->size);
+}
+
+typedef struct {
   FILE *ms;      // Mapping Structure
   FILE *fs;      // Virtual Filesystem
   u_int32_t pos; // Current Position
+  HashVec hash_vec;
 } GlobalThings;
+
+static void assert_hash_is_unique(u_int32_t hash_value, GlobalThings *things) {
+
+  for (size_t i = 0; i < things->hash_vec.size; ++i) {
+    u_int32_t item = things->hash_vec.items[i];
+
+    if (item == hash_value) {
+
+      fprintf(stderr, "Duplicate hash detected: %u == %u\n", item, hash_value);
+      exit(3);
+    }
+  }
+
+  hash_vec_add(&(things->hash_vec), hash_value);
+
+  //
+}
 
 static void cembed(const char *const filename, const char *root_dir,
                    GlobalThings *things) {
@@ -48,6 +105,8 @@ static void cembed(const char *const filename, const char *root_dir,
 
     filename_hash = hash(filename_relative);
   }
+
+  assert_hash_is_unique(filename_hash, things);
 
   fseek(file, 0, SEEK_END); // Define Map
   u_int32_t file_size = (u_int32_t)ftell(file);
@@ -198,7 +257,9 @@ int main(int argc, char *argv[]) {
                                         .output = NULL,
                                         .input = NULL};
 
-  GlobalThings things = (GlobalThings){.ms = NULL, .fs = NULL, .pos = 0};
+  GlobalThings things =
+      (GlobalThings){.ms = NULL, .fs = NULL, .pos = 0, .hash_vec = {}};
+  hash_vec_init(&(things.hash_vec));
 
   for (size_t i = 1; i < (size_t)argc; i++) {
     const char *const arg = argv[i];
@@ -267,6 +328,7 @@ int main(int argc, char *argv[]) {
 
   fclose(things.ms);
   fclose(things.fs);
+  hash_vec_destroy(&(things.hash_vec));
 
   // Convert to Embeddable Symbols
 
