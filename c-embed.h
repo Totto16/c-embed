@@ -17,7 +17,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-u_int32_t hash(char * key){   // Hash Function: MurmurOAAT64
+u_int32_t hash(const char * key){   // Hash Function: MurmurOAAT64
   u_int32_t h = 3323198485ul;
   for (;*key;++key) {
     h ^= *key;
