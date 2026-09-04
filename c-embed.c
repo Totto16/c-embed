@@ -106,6 +106,19 @@ void iterdir(char* d){
 
 }
 
+void system_checked(const char *command){
+
+  int result = system(command);
+
+  if(result != 0){
+    fprintf(stderr, "system() failed with %d: %s\n", result, command);
+    exit(1);
+  }
+
+}
+
+#define system system_checked
+
 int main(int argc, char* argv[]){
 
   char fmt[CEMBED_MAXPATH];
