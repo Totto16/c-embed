@@ -37,3 +37,5 @@ c_embed_dep = declare_dependency(
 )
 
 meson.override_dependency('c-embed', c_embed_dep)
+
+subdir('examples')

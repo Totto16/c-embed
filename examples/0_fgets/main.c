@@ -1,19 +1,21 @@
-#include <stdio.h>
+#include <c-embed.h>
 
-int main(int argc, char* args[]){
+int main(void) {
 
-  FILE* eFile = fopen("data/data2/data2.txt", "r");
+  FILE *eFile = fopen("/data2/data2.txt", "r");
 
-  char buffer [100] = {' '};
+  char buffer[100] = {' '};
 
-  if (eFile == NULL)
-    perror ("Error opening file");
+  if (eFile == NULL) {
+    perror("Error opening file");
+    return 1;
+  }
 
-  else while(!feof(eFile)){
-    if( fgets(buffer, 100, eFile) == NULL ) break;
-    fputs (buffer , stdout);
+  while (!feof(eFile)) {
+    if (fgets(buffer, 100, eFile) == NULL)
+      break;
+    fputs(buffer, stdout);
   }
 
   fclose(eFile);
-
 }

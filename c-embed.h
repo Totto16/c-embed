@@ -88,7 +88,7 @@ const char *eerrstr(int e) {
   default:
     return "Unknown cembed error code.";
   };
-};
+}
 
 #define eerror(c) printf("%s: (%u) %s\n", c, eerrcode, eerrstr(eerrcode))
 
