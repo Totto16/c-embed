@@ -183,7 +183,7 @@ long int etell(EFILE* e){
   return (e->end - e->pos) - e->size;
 }
 
-void rewind(EFILE* e){
+void erewind(EFILE* e){
   e->pos = (e->end - e->size);
 }
 
@@ -218,6 +218,7 @@ int eseek ( EFILE* stream, long int offset, int origin ){
 #define fread eread
 #define fseek eseek
 #define ftell etell
+#define rewind erewind
 #endif
 
 #endif
