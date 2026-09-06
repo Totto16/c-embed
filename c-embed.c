@@ -364,7 +364,7 @@ int main(int argc, char *argv[]) {
   sprintf(fmt, "rm -rf %s", CEMBED_TMPDIR);
   system_checked(fmt);
 
-  printf("Created final object file at: %s", settings.output);
+  printf("Created final object file at: %s\n", settings.output);
 
   return 0;
 }
