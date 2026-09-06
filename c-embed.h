@@ -64,14 +64,18 @@ THREAD_LOCAL int eerrcode = 0;
 #define EERRCODE_NOMAP 2
 #define EERRCODE_NULLSTREAM 3
 #define EERRCODE_OOBSTREAMPOS 4
+#define EERRCODE_INVALIDMODE 5
+#define EERRCODE_INVALIARGUMENTS 6
 
 const char* eerrstr(int e){
 switch(e){
-  case 0: return "Success.";
-  case 1: return "No file found.";
-  case 2: return "Mapping stucture error.";
-  case 3: return "File stream pointer is NULL.";
-  case 4: return "File stream pointer is out-of-bounds.";
+  case EERRCODE_SUCCESS: return "Success.";
+  case EERRCODE_NOFILE: return "No file found.";
+  case EERRCODE_NOMAP: return "Mapping stucture error.";
+  case EERRCODE_NULLSTREAM: return "File stream pointer is NULL.";
+  case EERRCODE_OOBSTREAMPOS: return "File stream pointer is out-of-bounds.";
+  case EERRCODE_INVALIDMODE: return "Invalid mode";
+  case EERRCODE_INVALIARGUMENTS: return "Invalid arguments";
   default: return "Unknown cembed error code.";
 };
 };
@@ -92,22 +96,29 @@ extern char cembed_fs_size;
 
 EFILE* eopen(const char* file, const char* mode){
 
+  if(strcmp(mode,"r") != 0){
+    ethrow(EERRCODE_INVALIDMODE);
+  }
+
   EMAP* map = (EMAP*)(&cembed_map_start);
   const char* end = &cembed_map_end;
 
-  if( map == NULL || end == NULL )
+  if( map == NULL || end == NULL ){
     ethrow(EERRCODE_NOMAP);
+  }
 
   const u_int32_t key = hash((char*)file);
-  while( ((char*)map != end) && (map->hash != key) )
+  while( ((char*)map != end) && (map->hash != key) ){
     map++;
+  }
 
-  if(map->hash != key)
+  if(map->hash != key){
     ethrow(EERRCODE_NOFILE);
+  }
 
-  EFILE* e = (EFILE*)malloc(sizeof *e);
+  EFILE* e = (EFILE*)malloc(sizeof(*e));
   e->pos = (&cembed_fs_start + map->pos);
-  e->end = (&cembed_fs_start + map->pos + map->size);
+  e->end = (&cembed_fs_start + (map->pos + map->size));
   e->size = map->size;
 
   return e;
@@ -119,6 +130,8 @@ void eclose(EFILE* e){
   e = NULL;
 }
 
+#define E_START(e) ((e)->end - (e)->size)
+
 bool eeof(EFILE* e){
   if(e == NULL){
     (eerrcode = (EERRCODE_NULLSTREAM));
@@ -128,23 +141,39 @@ bool eeof(EFILE* e){
     (eerrcode = (EERRCODE_OOBSTREAMPOS));
     return true;
   }
-  if((e->end - e->pos) - e->size < 0){
+  if(e->pos < E_START(e)){
     (eerrcode = (EERRCODE_OOBSTREAMPOS));
     return true;
   }
+
+  (eerrcode = (EERRCODE_SUCCESS));
   return (e->end == e->pos);
 }
 
 size_t eread(void* ptr, size_t size, size_t count, EFILE* stream){
 
-  if(stream->end - stream->pos < size*count){
+  bool eof = eeof(stream);
+  if(eerrcode != EERRCODE_SUCCESS){
+    return 0;
+  }
+
+  if(eof){
+    (eerrcode = (EERRCODE_SUCCESS));
+    return 0;
+  }
+
+  if((size_t)(stream->end - stream->pos) < size*count){
     size_t scount = stream->end - stream->pos;
     memcpy(ptr, (void*)stream->pos, scount);
     stream->pos = stream->end;
+    
+    (eerrcode = (EERRCODE_SUCCESS));
     return (scount/size);
   }
 
   memcpy(ptr, (void*)stream->pos, size*count);
+  
+  (eerrcode = (EERRCODE_SUCCESS));
   return count;
 
 }
@@ -180,7 +209,17 @@ int egetc ( EFILE* stream ){
 }
 
 long int etell(EFILE* e){
-  return (e->end - e->pos) - e->size;
+  if(e->end < e->pos){
+    (eerrcode = (EERRCODE_OOBSTREAMPOS));
+    return -1;
+  }
+  if(e->pos < E_START(e)){
+    (eerrcode = (EERRCODE_OOBSTREAMPOS));
+    return -1;
+  }
+
+  (eerrcode = (EERRCODE_SUCCESS));
+  return e->pos - E_START(e);
 }
 
 void erewind(EFILE* e){
@@ -189,18 +228,23 @@ void erewind(EFILE* e){
 
 int eseek ( EFILE* stream, long int offset, int origin ){
 
-  if(origin == SEEK_SET)
-    stream->pos = stream->end - stream->size + offset;
-  if(origin == SEEK_CUR)
+  if(origin == SEEK_SET){
+    stream->pos = E_START(stream) + offset;
+  }else if(origin == SEEK_CUR){
     stream->pos += offset;
-  if(origin == SEEK_END)
+  }else if(origin == SEEK_END){
     stream->pos = stream->end + offset;
+  }else{
+    (eerrcode = (EERRCODE_INVALIARGUMENTS));
+    return -1;
+  }
 
   if(stream->end < stream->pos || etell(stream)  < 0){
     (eerrcode = (EERRCODE_OOBSTREAMPOS));
-    return true;
+    return -1;
   }
 
+  (eerrcode = (EERRCODE_SUCCESS));
   return 0;
 
 }

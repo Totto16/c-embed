@@ -125,8 +125,8 @@ static void cembed(const char *const filename, const char *root_dir,
     return;
   }
 
-  fwrite(&map, sizeof map, 1, things->ms); // Write Mapping Structure
-  fwrite(buf, map.size, 1, things->fs);    // Write Virtual Filesystem
+  fwrite(&map, sizeof(map), 1, things->ms); // Write Mapping Structure
+  fwrite(buf, map.size, 1, things->fs);     // Write Virtual Filesystem
 
   free(buf);               // Free Buffer
   fclose(file);            // Close the File
