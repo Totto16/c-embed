@@ -204,8 +204,8 @@ static void assert_name_matches(const char *const parent_directory,
 
   if (parent_directory == NULL) {
     if (entry_name != NULL) {
-      fprintf(stderr, "names don't match (%d): %s != %s/%s\n", __LINE__,
-              whole_name, parent_directory, entry_name);
+      fprintf(stderr, "names don't match (%d): %s != <NULL>/%s\n", __LINE__,
+              whole_name, entry_name);
       exit(3);
     }
     return;
@@ -268,7 +268,7 @@ static void add_file_to_dir(const char *parent_directory,
 
 static hash_t get_hash_relative(const char *const entry, const char *root_dir) {
   if (root_dir == NULL) {
-    fprintf(stderr, "Invalid root: %s\n", root_dir);
+    fprintf(stderr, "Invalid root: <NULL>\n");
     exit(2);
   }
 

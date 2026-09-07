@@ -386,7 +386,7 @@ int ereaddir(EFILE *stream, edirent *ent) {
     }
   }
 
-  *ent = (edirent){.name = entry_name, .type = map->entry.type};
+  *ent = (edirent){.type = map->entry.type, .name = entry_name};
   return EERRCODE_SUCCESS;
 }
 
