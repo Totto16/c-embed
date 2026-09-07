@@ -15,11 +15,9 @@ project(
 
 inc_dirs = include_directories('.')
 
-
-
 c_embed_exe = executable(
-    'c-embed',
-    files('c-embed.c'),
+    'c-embed-exe',
+    files('c-embed-exe.c'),
     include_directories: inc_dirs,
     native: true,
 )
@@ -30,8 +28,18 @@ meson.override_find_program(
     native: true,
 )
 
+c_embed_lib = static_library(
+    'c-embed',
+    files(
+        'c-embed.c',
+        'cembed_hash.h',
+        'c-embed.h',
+    ),
+    include_directories: inc_dirs,
+)
 
 c_embed_dep = declare_dependency(
+    link_with: c_embed_lib,
     include_directories: inc_dirs,
     version: meson.project_version(),
 )

@@ -1,4 +1,3 @@
-#define CEMBED_IMPLEMENTATION
 #include <c-embed.h>
 
 void write_impl(void *buf, size_t size);

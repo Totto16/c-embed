@@ -1,5 +1,3 @@
-
-#define CEMBED_IMPLEMENTATION
 #define CEMBED_TRANSLATE
 #include <c-embed.h>
 

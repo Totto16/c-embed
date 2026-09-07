@@ -16,16 +16,14 @@
 extern "C" {
 #endif
 
+#include "./cembed_hash.h"
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-
-typedef u_int32_t hash_t;
-
-hash_t hash(const char *key);
 
 typedef size_t epos_t;
 
@@ -111,7 +109,7 @@ void erewind(EFILE *e);
 int eseek(EFILE *stream, long int offset, int origin);
 #endif
 
-#ifdef CEMBED_IMPLEMENTATION
+#if defined(CEMBED_IMPLEMENTATION) || defined(CEMBED_BUILD)
 
 typedef struct EMAP_ENTRY_FILE_S {
   u_int32_t file_size;
@@ -159,15 +157,9 @@ typedef struct {
 
 typedef u_int32_t cookie_t;
 
-hash_t hash(const char *key) { // Hash Function: MurmurOAAT64
-  hash_t h = 3323198485ul;
-  for (; *key; ++key) {
-    h ^= *key;
-    h *= 0x5bd1e995;
-    h ^= h >> 15;
-  }
-  return h;
-}
+#endif
+
+#ifdef CEMBED_IMPLEMENTATION
 
 THREAD_LOCAL int eerrcode = 0;
 
@@ -225,8 +217,7 @@ int eerrno_to_errno(int eerrno) {
   };
 }
 
-// File Usage
-#ifndef CEMBED_BUILD
+#if defined(CEMBED_IMPLEMENTATION) && !defined(CEMBED_BUILD)
 
 extern byte_t cembed_map_start; // Embedded Indexing Structure
 extern byte_t cembed_map_end;
@@ -235,6 +226,11 @@ extern byte_t cembed_map_size;
 extern byte_t cembed_fs_start; // Embedded Virtual File System
 extern byte_t cembed_fs_end;
 extern byte_t cembed_fs_size;
+
+#endif
+
+// File Usage
+#ifndef CEMBED_BUILD
 
 EFILE *eopen(const char *file, const char *mode) {
 
