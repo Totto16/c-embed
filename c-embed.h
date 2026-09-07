@@ -11,14 +11,17 @@
 #ifndef CEMBED
 #define CEMBED
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
-u_int32_t hash(const char *key) { // Hash Function: MurmurOAAT64
-  u_int32_t h = 3323198485ul;
+typedef u_int32_t hash_t;
+
+hash_t hash(const char *key) { // Hash Function: MurmurOAAT64
+  hash_t h = 3323198485ul;
   for (; *key; ++key) {
     h ^= *key;
     h *= 0x5bd1e995;
@@ -29,20 +32,45 @@ u_int32_t hash(const char *key) { // Hash Function: MurmurOAAT64
 
 typedef size_t epos_t;
 
-struct EMAP_S { // Map Indexing Struct
-  u_int32_t hash;
-  u_int32_t pos;
-  u_int32_t size;
-};
-typedef struct EMAP_S EMAP;
+typedef struct EMAP_ENTRY_FILE_S {
+  u_int32_t file_size;
+} __attribute__((packed)) EMAP_ENTRY_FILE;
 
-struct EFILE_S { // Virtual File Stream
+typedef struct EMAP_ENTRY_DIR_S {
+  u_int32_t file_array_size;
+} __attribute__((packed)) EMAP_ENTRY_DIR;
+
+#define EMAP_ENTRY_TYPE_FILE 0
+#define EMAP_ENTRY_TYPE_DIR 1
+
+typedef struct EMAP_ENTRY_S {
+  u_int8_t type;
+  union {
+    EMAP_ENTRY_FILE file;
+    EMAP_ENTRY_DIR dir;
+  } data;
+} __attribute__((packed)) EMAP_ENTRY;
+
+#define NEW_EMAP_ENTRY_FILE(size)                                              \
+  ((EMAP_ENTRY){.type = EMAP_ENTRY_TYPE_FILE,                                  \
+                .data = {.file = (EMAP_ENTRY_FILE){.file_size = (size)}}})
+
+#define NEW_EMAP_ENTRY_DIR(size)                                               \
+  ((EMAP_ENTRY){.type = EMAP_ENTRY_TYPE_DIR,                                   \
+                .data = {.dir = (EMAP_ENTRY_DIR){.file_array_size = (size)}}})
+
+typedef struct EMAP_S { // Map Indexing Struct
+  hash_t hash;
+  u_int32_t pos;
+  EMAP_ENTRY entry;
+} __attribute__((packed)) EMAP;
+
+typedef struct EFILE_S { // Virtual File Stream
   char *pos;
   char *end;
-  size_t size;
-  int err;
-};
-typedef struct EFILE_S EFILE;
+  u_int32_t size;
+  EMAP_ENTRY entry;
+} EFILE;
 
 // Error Handling
 
@@ -66,8 +94,11 @@ THREAD_LOCAL int eerrcode = 0;
 #define EERRCODE_NOMAP 2
 #define EERRCODE_NULLSTREAM 3
 #define EERRCODE_OOBSTREAMPOS 4
-#define EERRCODE_INVALIDMODE 5
-#define EERRCODE_INVALIARGUMENTS 6
+#define EERRCODE_INVALID_MODE 5
+#define EERRCODE_INVALID_ARGUMENTS 6
+#define EERRCODE_INTERNAL_ERROR 7
+#define EERRCODE_IS_DIRECTORY 8
+#define EERRCODE_IS_FILE 9
 
 const char *eerrstr(int e) {
   switch (e) {
@@ -81,12 +112,45 @@ const char *eerrstr(int e) {
     return "File stream pointer is NULL.";
   case EERRCODE_OOBSTREAMPOS:
     return "File stream pointer is out-of-bounds.";
-  case EERRCODE_INVALIDMODE:
+  case EERRCODE_INVALID_MODE:
     return "Invalid mode";
-  case EERRCODE_INVALIARGUMENTS:
+  case EERRCODE_INVALID_ARGUMENTS:
     return "Invalid arguments";
+  case EERRCODE_INTERNAL_ERROR:
+    return "Internal error";
+  case EERRCODE_IS_DIRECTORY:
+    return "is a directory";
+  case EERRCODE_IS_FILE:
+    return "is a file";
   default:
     return "Unknown cembed error code.";
+  };
+}
+
+int eerrno_to_errno(int eerrno) {
+  switch (eerrno) {
+  case EERRCODE_SUCCESS:
+    return 0;
+  case EERRCODE_NOFILE:
+    return ENOENT;
+  case EERRCODE_NOMAP:
+    return ENODEV;
+  case EERRCODE_NULLSTREAM:
+    return EINVAL;
+  case EERRCODE_OOBSTREAMPOS:
+    return EINVAL;
+  case EERRCODE_INVALID_MODE:
+    return EINVAL;
+  case EERRCODE_INVALID_ARGUMENTS:
+    return EINVAL;
+  case EERRCODE_INTERNAL_ERROR:
+    return EINVAL;
+  case EERRCODE_IS_DIRECTORY:
+    return EISDIR;
+  case EERRCODE_IS_FILE:
+    return EBADF;
+  default:
+    return EINVAL;
   };
 }
 
@@ -107,7 +171,7 @@ extern char cembed_fs_size;
 EFILE *eopen(const char *file, const char *mode) {
 
   if (strcmp(mode, "r") != 0) {
-    ethrow(EERRCODE_INVALIDMODE);
+    ethrow(EERRCODE_INVALID_MODE);
   }
 
   EMAP *map = (EMAP *)(&cembed_map_start);
@@ -128,8 +192,18 @@ EFILE *eopen(const char *file, const char *mode) {
 
   EFILE *e = (EFILE *)malloc(sizeof(*e));
   e->pos = (&cembed_fs_start + map->pos);
-  e->end = (&cembed_fs_start + (map->pos + map->size));
-  e->size = map->size;
+  e->entry = map->entry;
+
+  if (map->entry.type == EMAP_ENTRY_TYPE_FILE) {
+    e->size = map->entry.data.file.file_size;
+  } else if (map->entry.type == EMAP_ENTRY_TYPE_DIR) {
+    e->size = map->entry.data.dir.file_array_size;
+  } else {
+    free(e);
+    ethrow(EERRCODE_INTERNAL_ERROR);
+  }
+
+  e->end = (&cembed_fs_start + (map->pos + e->size));
 
   return e;
 }
@@ -140,6 +214,20 @@ void eclose(EFILE *e) {
 }
 
 #define E_START(e) ((e)->end - (e)->size)
+
+int estreamtype(EFILE *e) {
+  if (e == NULL) {
+    return -1;
+  }
+
+  if (e->entry.type == EMAP_ENTRY_TYPE_FILE) {
+    return EMAP_ENTRY_TYPE_FILE;
+  } else if (e->entry.type == EMAP_ENTRY_TYPE_DIR) {
+    return EMAP_ENTRY_TYPE_DIR;
+  } else {
+    return -1;
+  }
+}
 
 bool eeof(EFILE *e) {
   if (e == NULL) {
@@ -160,6 +248,11 @@ bool eeof(EFILE *e) {
 }
 
 size_t eread(void *ptr, size_t size, size_t count, EFILE *stream) {
+
+  if (stream->entry.type != EMAP_ENTRY_TYPE_FILE) {
+    (eerrcode = (EERRCODE_IS_DIRECTORY));
+    return 0;
+  }
 
   bool eof = eeof(stream);
   if (eerrcode != EERRCODE_SUCCESS) {
@@ -199,18 +292,29 @@ int egetpos(EFILE *e, epos_t *pos) {
 
 char *egets(char *str, int num, EFILE *stream) {
 
-  if (eeof(stream))
+  if (stream->entry.type != EMAP_ENTRY_TYPE_FILE) {
     return NULL;
+  }
 
-  for (int i = 0; i < num && !eeof(stream) && *(stream->pos) != '\r'; i++)
+  if (eeof(stream)) {
+    return NULL;
+  }
+
+  for (int i = 0; i < num && !eeof(stream) && *(stream->pos) != '\r'; i++) {
     str[i] = *(stream->pos++);
+  }
 
   return str;
 }
 
 int egetc(EFILE *stream) {
-  if (eeof(stream))
+  if (stream->entry.type != EMAP_ENTRY_TYPE_FILE) {
     return -1;
+  }
+
+  if (eeof(stream)) {
+    return -1;
+  }
   return (int)(*(stream->pos++));
 }
 
@@ -232,6 +336,8 @@ void erewind(EFILE *e) { e->pos = (e->end - e->size); }
 
 int eseek(EFILE *stream, long int offset, int origin) {
 
+  // TODO: validate seeks in directory streams
+
   if (origin == SEEK_SET) {
     stream->pos = E_START(stream) + offset;
   } else if (origin == SEEK_CUR) {
@@ -239,7 +345,7 @@ int eseek(EFILE *stream, long int offset, int origin) {
   } else if (origin == SEEK_END) {
     stream->pos = stream->end + offset;
   } else {
-    (eerrcode = (EERRCODE_INVALIARGUMENTS));
+    (eerrcode = (EERRCODE_INVALID_ARGUMENTS));
     return -1;
   }
 

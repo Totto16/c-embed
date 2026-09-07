@@ -10,24 +10,57 @@
 
 #define CEMBED_BUILD
 
+#define _POSIX_C_SOURCE 200809L
+#include <string.h>
+
 #include "c-embed.h"
+
 #include <assert.h>
 #include <dirent.h>
+#include <errno.h>
 #include <stdbool.h>
-#include <string.h>
+
+typedef hash_t HASH_VEC_ITEM;
 
 typedef struct {
   size_t size;
   size_t capacity;
-  u_int32_t *items;
+  HASH_VEC_ITEM *items;
 } HashVec;
+
+typedef struct {
+  hash_t hash;
+  size_t name_size;
+  const char *name;
+} FileVecEntry;
+
+typedef FileVecEntry FILE_VEC_ITEM;
+
+typedef struct {
+  size_t size;
+  size_t capacity;
+  FILE_VEC_ITEM *items;
+} FileVec;
+
+typedef struct {
+  hash_t hash;
+  FileVec files;
+} DirVecEntry;
+
+typedef DirVecEntry DIR_VEC_ITEM;
+
+typedef struct {
+  size_t size;
+  size_t capacity;
+  DIR_VEC_ITEM *items;
+} DirectoryVec;
 
 #define INITIAL_VEC_CAPACITY 8
 #define VEC_CAPACITY_MULT 2
 
 static void hash_vec_init(HashVec *vec) {
 
-  u_int32_t *items = malloc(sizeof(u_int32_t) * INITIAL_VEC_CAPACITY);
+  HASH_VEC_ITEM *items = malloc(sizeof(HASH_VEC_ITEM) * INITIAL_VEC_CAPACITY);
 
   assert(items != NULL);
 
@@ -36,12 +69,88 @@ static void hash_vec_init(HashVec *vec) {
 
 static void hash_vec_destroy(HashVec *vec) { free(vec->items); }
 
-static void hash_vec_add(HashVec *vec, u_int32_t item) {
+static void hash_vec_add(HashVec *vec, HASH_VEC_ITEM item) {
 
   if (vec->size == vec->capacity) {
     size_t new_capacity = vec->capacity * VEC_CAPACITY_MULT;
-    u_int32_t *new_items =
-        realloc(vec->items, sizeof(u_int32_t) * new_capacity);
+    HASH_VEC_ITEM *new_items =
+        realloc(vec->items, sizeof(HASH_VEC_ITEM) * new_capacity);
+
+    assert(new_items != NULL);
+
+    vec->capacity = new_capacity;
+    vec->items = new_items;
+  }
+
+  vec->items[vec->size] = item;
+
+  ++(vec->size);
+}
+
+static void file_vec_init(FileVec *vec) {
+
+  FILE_VEC_ITEM *items = malloc(sizeof(FILE_VEC_ITEM) * INITIAL_VEC_CAPACITY);
+
+  assert(items != NULL);
+
+  *vec = (FileVec){.size = 0, .capacity = INITIAL_VEC_CAPACITY, .items = items};
+}
+
+static void file_vec_destroy(FileVec *vec) {
+
+  for (size_t i = 0; i < vec->size; ++i) {
+    FILE_VEC_ITEM *item = &(vec->items[i]);
+
+    free((void *)item->name);
+  }
+
+  free(vec->items);
+}
+
+static void file_vec_add(FileVec *vec, FILE_VEC_ITEM item) {
+
+  if (vec->size == vec->capacity) {
+    size_t new_capacity = vec->capacity * VEC_CAPACITY_MULT;
+    FILE_VEC_ITEM *new_items =
+        realloc(vec->items, sizeof(FILE_VEC_ITEM) * new_capacity);
+
+    assert(new_items != NULL);
+
+    vec->capacity = new_capacity;
+    vec->items = new_items;
+  }
+
+  vec->items[vec->size] = item;
+
+  ++(vec->size);
+}
+
+static void dir_vec_init(DirectoryVec *vec) {
+
+  DIR_VEC_ITEM *items = malloc(sizeof(DIR_VEC_ITEM) * INITIAL_VEC_CAPACITY);
+
+  assert(items != NULL);
+
+  *vec = (DirectoryVec){
+      .size = 0, .capacity = INITIAL_VEC_CAPACITY, .items = items};
+}
+
+static void dir_vec_destroy(DirectoryVec *vec) {
+  for (size_t i = 0; i < vec->size; ++i) {
+    DIR_VEC_ITEM *item = &(vec->items[i]);
+
+    file_vec_destroy(&(item->files));
+  }
+
+  free(vec->items);
+}
+
+static void dir_vec_add(DirectoryVec *vec, DIR_VEC_ITEM item) {
+
+  if (vec->size == vec->capacity) {
+    size_t new_capacity = vec->capacity * VEC_CAPACITY_MULT;
+    DIR_VEC_ITEM *new_items =
+        realloc(vec->items, sizeof(DIR_VEC_ITEM) * new_capacity);
 
     assert(new_items != NULL);
 
@@ -59,12 +168,14 @@ typedef struct {
   FILE *fs;      // Virtual Filesystem
   u_int32_t pos; // Current Position
   HashVec hash_vec;
+  DirectoryVec dir_vec;
 } GlobalThings;
 
-static void assert_hash_is_unique(u_int32_t hash_value, GlobalThings *things) {
+static void assert_hash_is_unique(HASH_VEC_ITEM hash_value,
+                                  HashVec *const hash_vec) {
 
-  for (size_t i = 0; i < things->hash_vec.size; ++i) {
-    u_int32_t item = things->hash_vec.items[i];
+  for (size_t i = 0; i < hash_vec->size; ++i) {
+    HASH_VEC_ITEM item = hash_vec->items[i];
 
     if (item == hash_value) {
 
@@ -73,65 +184,183 @@ static void assert_hash_is_unique(u_int32_t hash_value, GlobalThings *things) {
     }
   }
 
-  hash_vec_add(&(things->hash_vec), hash_value);
+  hash_vec_add(hash_vec, hash_value);
+}
 
-  //
+static void assert_dir_is_unique(DIR_VEC_ITEM dir_value,
+                                 DirectoryVec *const dir_vec) {
+
+  for (size_t i = 0; i < dir_vec->size; ++i) {
+    DIR_VEC_ITEM item = dir_vec->items[i];
+
+    if (item.hash == dir_value.hash) {
+
+      fprintf(stderr, "Duplicate dir detected: %u == %u\n", item.hash,
+              dir_value.hash);
+      exit(3);
+    }
+  }
+
+  dir_vec_add(dir_vec, dir_value);
+}
+
+static void assert_name_matches(const char *const parent_directory,
+                                const char *const entry_name,
+                                const char *const whole_name) {
+
+  if (parent_directory == NULL) {
+    if (entry_name != NULL) {
+      fprintf(stderr, "names don't match (%d): %s != %s/%s\n", __LINE__,
+              whole_name, parent_directory, entry_name);
+      exit(3);
+    }
+    return;
+  }
+
+  size_t parent_len = strlen(parent_directory);
+  size_t entry_len = strlen(entry_name);
+  size_t whole_len = strlen(whole_name);
+
+  if (parent_len + entry_len + 1 != whole_len) {
+    fprintf(stderr, "names don't match (%d): %s != %s/%s\n", __LINE__,
+            whole_name, parent_directory, entry_name);
+    exit(3);
+  }
+
+  assert(whole_len > parent_len);
+
+  if (strncmp(parent_directory, whole_name, parent_len) != 0) {
+    fprintf(stderr, "names don't match (%d): %s != %s/%s\n", __LINE__,
+            whole_name, parent_directory, entry_name);
+    exit(3);
+  }
+
+  if (whole_name[parent_len] != '/') {
+    fprintf(stderr, "names don't match (%d): %s != %s/%s\n", __LINE__,
+            whole_name, parent_directory, entry_name);
+    exit(3);
+  }
+
+  assert(whole_len - parent_len > entry_len);
+
+  if (strncmp(entry_name, whole_name + parent_len + 1, entry_len) != 0) {
+    fprintf(stderr, "names don't match (%d): %s != %s/%s\n", __LINE__,
+            whole_name, parent_directory, entry_name);
+    exit(3);
+  }
+}
+
+static void add_file_to_dir(const char *parent_directory,
+                            hash_t parent_dir_hash, hash_t entry_hash,
+                            const char *entry_name,
+                            DirectoryVec *const dir_vec) {
+
+  for (size_t i = 0; i < dir_vec->size; ++i) {
+    DIR_VEC_ITEM *item = &(dir_vec->items[i]);
+
+    if (item->hash == parent_dir_hash) {
+      FILE_VEC_ITEM file_entry = {entry_hash, .name_size = strlen(entry_name),
+                                  .name = strdup(entry_name)};
+      file_vec_add(&(item->files), file_entry);
+      return;
+    }
+  }
+
+  fprintf(stderr, "No such dir found: %s hash: %u\n", parent_directory,
+          parent_dir_hash);
+  exit(3);
+}
+
+static hash_t get_hash_relative(const char *const entry, const char *root_dir) {
+  if (root_dir == NULL) {
+    fprintf(stderr, "Invalid root: %s\n", root_dir);
+    exit(2);
+  }
+
+  if (entry == NULL) {
+    return hash("/");
+  }
+
+  const char *entry_relative = entry;
+  const size_t entry_len = strlen(entry);
+  const size_t root_len = strlen(root_dir);
+  if (entry_len < root_len) {
+    fprintf(stderr, "Invalid file root: %s\n", root_dir);
+    exit(2);
+  }
+  for (size_t i = 0; i < root_len; ++i) {
+    if (entry[i] == root_dir[i]) {
+      entry_relative++;
+    }
+  }
+
+  return hash(entry_relative);
 }
 
 static void cembed(const char *const filename, const char *root_dir,
-                   GlobalThings *things) {
+                   GlobalThings *things, const char *parent_directory,
+                   bool is_dir, const char *entry_name) {
 
-  FILE *file = fopen(filename, "rb"); // Open the Embed Target File
-  if (file == NULL) {
-    printf("Failed to open file %s.", filename);
-    exit(4);
-  }
-  u_int32_t filename_hash = hash(filename);
+  hash_t entry_hash = get_hash_relative(filename, root_dir);
 
-  if (root_dir != NULL) {
+  assert_hash_is_unique(entry_hash, &(things->hash_vec));
 
-    const char *filename_relative = filename;
-    const size_t filename_len = strlen(filename);
-    const size_t root_len = strlen(root_dir);
-    if (filename_len < root_len) {
-      fprintf(stderr, "Invalid file root: %s\n", root_dir);
-      exit(2);
+  if (is_dir) {
+
+    DirVecEntry dir_entry = (DirVecEntry){.hash = entry_hash, .files = {}};
+    file_vec_init(&(dir_entry.files));
+
+    assert_dir_is_unique(dir_entry, &(things->dir_vec));
+
+  } else {
+
+    FILE *file = fopen(filename, "rb"); // Open the Embed Target File
+    if (file == NULL) {
+      printf("Failed to open file %s.", filename);
+      exit(4);
     }
-    for (size_t i = 0; i < root_len; ++i) {
-      if (filename[i] == root_dir[i]) {
-        filename_relative++;
-      }
+    fseek(file, 0, SEEK_END); // Define Map
+    u_int32_t file_size = (u_int32_t)ftell(file);
+    rewind(file);
+
+    EMAP_ENTRY entry = NEW_EMAP_ENTRY_FILE(file_size);
+
+    char *buf = malloc(sizeof(char) * file_size);
+    if (buf == NULL) {
+      printf("Memory error for file %s.", filename);
+      return;
     }
 
-    filename_hash = hash(filename_relative);
+    u_int32_t result = fread(buf, 1, file_size, file);
+    if (result != file_size) {
+      printf("Read error for file %s.", filename);
+      return;
+    }
+
+    EMAP map = {
+        .hash = entry_hash,
+        .pos = things->pos,
+        .entry = entry,
+    };
+
+    fwrite(&map, sizeof(map), 1,
+           things->ms); // Write Mapping Structure
+    fwrite(buf, file_size, 1,
+           things->fs); // Write Virtual Filesystem
+
+    free(buf);                // Free Buffer
+    fclose(file);             // Close the File
+    things->pos += file_size; // Shift the Index Position
   }
 
-  assert_hash_is_unique(filename_hash, things);
+  hash_t parent_dir_hash = get_hash_relative(parent_directory, root_dir);
 
-  fseek(file, 0, SEEK_END); // Define Map
-  u_int32_t file_size = (u_int32_t)ftell(file);
-  EMAP map = {.hash = filename_hash, .pos = things->pos, .size = file_size};
-  rewind(file);
+  assert_name_matches(parent_directory, entry_name, filename);
 
-  char *buf = malloc(sizeof(char) * (map.size));
-  if (buf == NULL) {
-    printf("Memory error for file %s.", filename);
-    return;
+  if (parent_directory != NULL) {
+    add_file_to_dir(parent_directory, parent_dir_hash, entry_hash, entry_name,
+                    &(things->dir_vec));
   }
-
-  u_int32_t result = fread(buf, 1, map.size, file);
-  if (result != map.size) {
-    printf("Read error for file %s.", filename);
-    return;
-  }
-
-  fwrite(&map, sizeof(map), 1, things->ms); // Write Mapping Structure
-  fwrite(buf, map.size, 1, things->fs);     // Write Virtual Filesystem
-
-  free(buf);               // Free Buffer
-  fclose(file);            // Close the File
-  file = NULL;             // Reset the Pointer
-  things->pos += map.size; // Shift the Index Position
 }
 
 #define CEMBED_DIRENT_FILE 8
@@ -162,14 +391,19 @@ static void iterdir(const char *const d, const char *root_dir,
         strcpy(fullpath, d);
         strcat(fullpath, "/");
         strcat(fullpath, ent->d_name);
-        cembed(fullpath, root_dir, things);
-      }
-
-      else if (ent->d_type == CEMBED_DIRENT_DIR) {
+        cembed(fullpath, root_dir, things, d, false, ent->d_name);
+      } else if (ent->d_type == CEMBED_DIRENT_DIR) {
         strcpy(fullpath, d);
         strcat(fullpath, "/");
         strcat(fullpath, ent->d_name);
+        cembed(fullpath, root_dir, things, d, true, ent->d_name);
         iterdir(fullpath, root_dir, things);
+      } else {
+        strcpy(fullpath, d);
+        strcat(fullpath, "/");
+        strcat(fullpath, ent->d_name);
+        fprintf(stderr, "Ignored entry of type %d: %s\n", ent->d_type,
+                fullpath);
       }
     }
 
@@ -179,8 +413,8 @@ static void iterdir(const char *const d, const char *root_dir,
 
   else {
 
-    strcpy(fullpath, d);
-    cembed(fullpath, root_dir, things);
+    fprintf(stderr, "Couldn't open dir: %s -> %s\n", d, strerror(errno));
+    exit(2);
   }
 
   free(fullpath);
@@ -202,26 +436,23 @@ typedef enum {
 
 typedef struct {
   architecture arch;
-  bool relative;
   const char *output;
   const char *input;
 } Settings;
 
 static void iterdir_start(const Settings *const settings,
                           GlobalThings *things) {
-  if (settings->relative) {
 
-    if (is_directory(settings->input)) {
-      iterdir(settings->input, settings->input, things);
-      return;
-    }
+  if (is_directory(settings->input)) {
+    cembed(settings->input, settings->input, things, NULL, true, NULL);
+    iterdir(settings->input, settings->input, things);
 
-    fprintf(stderr, "Nort a directory, but requested relative mode %s\n",
-            settings->input);
-    exit(2);
+    // TODO: process dirs
+    return;
   }
 
-  iterdir(settings->input, NULL, things);
+  fprintf(stderr, "Not a directory: %s\n", settings->input);
+  exit(2);
 }
 
 void system_checked(const char *command) {
@@ -252,20 +483,17 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  static Settings settings = (Settings){.arch = architecture_elf64_x86_64,
-                                        .relative = false,
-                                        .output = NULL,
-                                        .input = NULL};
+  static Settings settings = (Settings){
+      .arch = architecture_elf64_x86_64, .output = NULL, .input = NULL};
 
-  GlobalThings things =
-      (GlobalThings){.ms = NULL, .fs = NULL, .pos = 0, .hash_vec = {}};
+  GlobalThings things = (GlobalThings){
+      .ms = NULL, .fs = NULL, .pos = 0, .hash_vec = {}, .dir_vec = {}};
   hash_vec_init(&(things.hash_vec));
+  dir_vec_init(&(things.dir_vec));
 
   for (size_t i = 1; i < (size_t)argc; i++) {
     const char *const arg = argv[i];
-    if (strcmp(arg, "-r") == 0) {
-      settings.relative = true;
-    } else if (strcmp(arg, "-a") == 0) {
+    if (strcmp(arg, "-a") == 0) {
       if ((i + 1) >= (size_t)argc) {
         fprintf(stderr, "Missing argument after %s\n", arg);
         return 1;
@@ -302,6 +530,17 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Missing input\n");
     return 1;
   }
+  size_t input_len = strlen(settings.input);
+
+  if (input_len == 0) {
+    fprintf(stderr, "Invalid input: %s\n", settings.input);
+    return 1;
+  }
+
+  if (settings.input[input_len - 1] == '/') {
+    fprintf(stderr, "Invalid input, trailing /: %s\n", settings.input);
+    return 1;
+  }
 
   if (settings.output == NULL) {
     fprintf(stderr, "Missing output\n");
@@ -329,6 +568,7 @@ int main(int argc, char *argv[]) {
   fclose(things.ms);
   fclose(things.fs);
   hash_vec_destroy(&(things.hash_vec));
+  dir_vec_destroy(&(things.dir_vec));
 
   // Convert to Embeddable Symbols
 

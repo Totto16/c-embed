@@ -7,7 +7,6 @@ foreach example : examples
         example + '_data.o',
         command: [
             c_embed_exe,
-            '-r',
             '-a',
             'elf64-x86-64',
             '-o',
