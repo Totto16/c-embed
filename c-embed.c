@@ -289,6 +289,10 @@ static hash_t get_hash_relative(const char *const entry, const char *root_dir) {
     }
   }
 
+  if (strlen(entry_relative) == 0) {
+    return hash("/");
+  }
+
   return hash(entry_relative);
 }
 

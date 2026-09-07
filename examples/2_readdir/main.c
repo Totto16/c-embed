@@ -5,11 +5,25 @@
 
 #include <c-embed.h>
 
-void write_impl(void *buf, size_t size);
+void add_seperator(char *path) {
+  size_t len = strlen(path);
+
+  if (len == 0) {
+    strcat(path, "/");
+    return;
+  }
+
+  if (path[len - 1] == '/') {
+    return;
+  }
+
+  strcat(path, "/");
+}
 
 #define EMAXPATH 512
+#define INDENT_WIDTH 2
 
-void iterdir(const char *const dirname, int indent) {
+void iterdir(const char *const dirname, size_t indent) {
 
   char *fullpath = (char *)malloc(EMAXPATH * sizeof(char));
 
@@ -36,24 +50,31 @@ void iterdir(const char *const dirname, int indent) {
 
     if (ent.type == EMAP_ENTRY_TYPE_FILE) {
       strcpy(fullpath, dirname);
-      strcat(fullpath, "/");
+      add_seperator(fullpath);
       strcat(fullpath, ent.name);
-      printf("%*sFILE: %s", indent, "", ent.name);
+      printf("%*sFILE: %s\n", (int)(indent * INDENT_WIDTH), "", ent.name);
     } else if (ent.type == EMAP_ENTRY_TYPE_DIR) {
       strcpy(fullpath, dirname);
-      strcat(fullpath, "/");
+      add_seperator(fullpath);
       strcat(fullpath, ent.name);
-      printf("%*sFOLDER: %s", indent, "", ent.name);
+      printf("%*sFOLDER: %s/\n", (int)(indent * INDENT_WIDTH), "", ent.name);
       iterdir(fullpath, indent + 1);
     } else {
       strcpy(fullpath, dirname);
-      strcat(fullpath, "/");
+      add_seperator(fullpath);
       strcat(fullpath, ent.name);
       fprintf(stderr, "Ignored entry of type %d: %s\n", ent.type, fullpath);
     }
   }
 
   eclose(eFile);
+}
+
+void iterdir_start(const char *const dirname) {
+
+  const size_t indent = 0;
+  printf("%*sFOLDER: %s\n", (int)(indent * INDENT_WIDTH), "", dirname);
+  iterdir(dirname, indent + 1);
 }
 
 int main(void) {
@@ -74,5 +95,5 @@ int main(void) {
 
   eclose(eFile);
 
-  iterdir("/", 0);
+  iterdir_start("/");
 }
