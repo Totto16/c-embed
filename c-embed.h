@@ -6,10 +6,15 @@
 # - with zero code modifications
 # - with zero clutter in your program
 # author: nicholas mcdonald 2022
+# and: Totto16 (2026)
 */
 
-#ifndef CEMBED
-#define CEMBED
+#if !defined(CEMBED_H)
+#define CEMBED_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <errno.h>
 #include <stdbool.h>
@@ -20,36 +25,12 @@
 
 typedef u_int32_t hash_t;
 
-hash_t hash(const char *key) { // Hash Function: MurmurOAAT64
-  hash_t h = 3323198485ul;
-  for (; *key; ++key) {
-    h ^= *key;
-    h *= 0x5bd1e995;
-    h ^= h >> 15;
-  }
-  return h;
-}
+hash_t hash(const char *key);
 
 typedef size_t epos_t;
 
-typedef struct EMAP_ENTRY_FILE_S {
-  u_int32_t file_size;
-} __attribute__((packed)) EMAP_ENTRY_FILE;
-
-typedef struct EMAP_ENTRY_DIR_S {
-  u_int32_t file_array_size;
-} __attribute__((packed)) EMAP_ENTRY_DIR;
-
 #define EMAP_ENTRY_TYPE_FILE 0
 #define EMAP_ENTRY_TYPE_DIR 1
-
-typedef struct EMAP_ENTRY_S {
-  u_int8_t type;
-  union {
-    EMAP_ENTRY_FILE file;
-    EMAP_ENTRY_DIR dir;
-  } data;
-} __attribute__((packed)) EMAP_ENTRY;
 
 #define NEW_EMAP_ENTRY_FILE(size)                                              \
   ((EMAP_ENTRY){.type = EMAP_ENTRY_TYPE_FILE,                                  \
@@ -59,40 +40,12 @@ typedef struct EMAP_ENTRY_S {
   ((EMAP_ENTRY){.type = EMAP_ENTRY_TYPE_DIR,                                   \
                 .data = {.dir = (EMAP_ENTRY_DIR){.file_array_size = (size)}}})
 
-typedef struct EMAP_S { // Map Indexing Struct
-  hash_t hash;
-  u_int32_t pos;
-  EMAP_ENTRY entry;
-} __attribute__((packed)) EMAP;
+typedef struct EFILE_S EFILE; // Virtual File Stream
 
-typedef u_int8_t byte_t;
-
-typedef struct EFILE_S { // Virtual File Stream
-  byte_t *pos;
-  byte_t *end;
-  u_int32_t size;
-  EMAP_ENTRY entry;
-} EFILE;
-
-typedef struct edirent_s {
+typedef struct {
   u_int8_t type;
   const char *name;
 } edirent;
-
-typedef struct {
-  hash_t hash;
-} DirEntryProps;
-
-typedef struct {
-  DirEntryProps properties;
-  const char *name;
-} DirEntryDynamic;
-
-// ([...('DirC').split("").map(a=>a.charCodeAt(0).toString(16)),
-// "0x"].reverse().join(""))
-#define DIR_ENTRY_COOKIE 0x43726944 ///< 'DirC'
-
-typedef u_int32_t cookie_t;
 
 // Error Handling
 
@@ -102,7 +55,7 @@ typedef u_int32_t cookie_t;
 #define THREAD_LOCAL __thread
 #endif
 
-THREAD_LOCAL int eerrcode = 0;
+extern THREAD_LOCAL int eerrcode;
 
 #define ethrow(err)                                                            \
   {                                                                            \
@@ -121,6 +74,100 @@ THREAD_LOCAL int eerrcode = 0;
 #define EERRCODE_INTERNAL_ERROR 7
 #define EERRCODE_IS_DIRECTORY 8
 #define EERRCODE_IS_FILE 9
+
+const char *eerrstr(int e);
+
+int eerrno_to_errno(int eerrno);
+
+#define eerror(c) printf("%s: (%u) %s\n", c, eerrcode, eerrstr(eerrcode))
+
+#define EREADDIR_FINISHED -1
+
+#ifndef CEMBED_BUILD
+EFILE *eopen(const char *file, const char *mode);
+
+void eclose(EFILE *e);
+
+int estreamtype(EFILE *e);
+
+bool eeof(EFILE *e);
+
+size_t eread(void *ptr, size_t size, size_t count, EFILE *stream);
+
+int ereaddir(EFILE *stream, edirent *ent);
+
+int egetpos(EFILE *e, epos_t *pos);
+
+char *egets(char *str, int num, EFILE *stream);
+
+int egetc(EFILE *stream);
+
+long int etell(EFILE *e);
+
+void erewind(EFILE *e);
+
+int eseek(EFILE *stream, long int offset, int origin);
+#endif
+
+#ifdef CEMBED_IMPLEMENTATION
+
+typedef struct EMAP_ENTRY_FILE_S {
+  u_int32_t file_size;
+} __attribute__((packed)) EMAP_ENTRY_FILE;
+
+typedef struct EMAP_ENTRY_DIR_S {
+  u_int32_t file_array_size;
+} __attribute__((packed)) EMAP_ENTRY_DIR;
+
+typedef struct EMAP_ENTRY_S {
+  u_int8_t type;
+  union {
+    EMAP_ENTRY_FILE file;
+    EMAP_ENTRY_DIR dir;
+  } data;
+} __attribute__((packed)) EMAP_ENTRY;
+
+typedef struct EMAP_S { // Map Indexing Struct
+  hash_t hash;
+  u_int32_t pos;
+  EMAP_ENTRY entry;
+} __attribute__((packed)) EMAP;
+
+typedef u_int8_t byte_t;
+
+struct EFILE_S {
+  byte_t *pos;
+  byte_t *end;
+  u_int32_t size;
+  EMAP_ENTRY entry;
+};
+
+typedef struct {
+  hash_t hash;
+} DirEntryProps;
+
+typedef struct {
+  DirEntryProps properties;
+  const char *name;
+} DirEntryDynamic;
+
+// ([...('DirC').split("").map(a=>a.charCodeAt(0).toString(16)),
+// "0x"].reverse().join(""))
+#define DIR_ENTRY_COOKIE 0x43726944 ///< 'DirC'
+
+typedef u_int32_t cookie_t;
+
+hash_t hash(const char *key) { // Hash Function: MurmurOAAT64
+  hash_t h = 3323198485ul;
+  for (; *key; ++key) {
+    h ^= *key;
+    h *= 0x5bd1e995;
+    h ^= h >> 15;
+  }
+  return h;
+}
+
+THREAD_LOCAL int eerrcode = 0;
 
 const char *eerrstr(int e) {
   switch (e) {
@@ -176,10 +223,7 @@ int eerrno_to_errno(int eerrno) {
   };
 }
 
-#define eerror(c) printf("%s: (%u) %s\n", c, eerrcode, eerrstr(eerrcode))
-
-// File Useage
-
+// File Usage
 #ifndef CEMBED_BUILD
 
 extern byte_t cembed_map_start; // Embedded Indexing Structure
@@ -316,8 +360,6 @@ size_t eread(void *ptr, size_t size, size_t count, EFILE *stream) {
   (eerrcode = (EERRCODE_SUCCESS));
   return count;
 }
-
-#define EREADDIR_FINISHED -1
 
 int ereaddir(EFILE *stream, edirent *ent) {
   if (stream->entry.type != EMAP_ENTRY_TYPE_DIR) {
@@ -489,4 +531,11 @@ int eseek(EFILE *stream, long int offset, int origin) {
 #endif
 
 #endif
+
+#endif
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

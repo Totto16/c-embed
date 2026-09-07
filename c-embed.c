@@ -9,6 +9,7 @@
 */
 
 #define CEMBED_BUILD
+#define CEMBED_IMPLEMENTATION
 
 #define _POSIX_C_SOURCE 200809L
 #include <string.h>

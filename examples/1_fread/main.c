@@ -1,8 +1,4 @@
-
-#ifdef CEMBED_TRANSLATE
-#undef CEMBED_TRANSLATE
-#endif
-
+#define CEMBED_IMPLEMENTATION
 #include <c-embed.h>
 
 void write_impl(void *buf, size_t size);

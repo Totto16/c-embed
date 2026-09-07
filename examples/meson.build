@@ -24,7 +24,7 @@ foreach example : examples
         embeded_data_o,
         files(example / 'main.c'),
         dependencies: [c_embed_dep],
-        c_args: ['-DCEMBED_TRANSLATE'],
+        c_args: [],
         override_options: {
             'warning_level': '3',
             'werror': true,
