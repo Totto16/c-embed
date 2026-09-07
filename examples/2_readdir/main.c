@@ -68,6 +68,7 @@ void iterdir(const char *const dirname, size_t indent) {
   }
 
   eclose(eFile);
+  free(fullpath);
 }
 
 void iterdir_start(const char *const dirname) {
