@@ -1,5 +1,5 @@
 
-examples = ['0_fgets', '1_fread','2_readdir']
+examples = ['0_fgets', '1_fread', '2_readdir']
 
 foreach example : examples
 
@@ -11,6 +11,8 @@ foreach example : examples
             'elf64-x86-64',
             '-o',
             '@OUTPUT@',
+            '-t',
+            '@OUTDIR@/' + example + '_tmp',
             meson.current_source_dir() / example / 'data',
         ],
         output: [example + '_data.o'],
@@ -27,6 +29,7 @@ foreach example : examples
             'warning_level': '3',
             'werror': true,
         },
+        build_by_default: true,
     )
 
     run_target(

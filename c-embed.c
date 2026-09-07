@@ -311,7 +311,7 @@ static void cembed(const char *const filename, const char *root_dir,
 
     FILE *file = fopen(filename, "rb"); // Open the Embed Target File
     if (file == NULL) {
-      printf("Failed to open file %s.", filename);
+      fprintf(stderr, "Failed to open file %s.", filename);
       exit(4);
     }
     fseek(file, 0, SEEK_END); // Define Map
@@ -322,14 +322,14 @@ static void cembed(const char *const filename, const char *root_dir,
 
     char *buf = malloc(sizeof(char) * file_size);
     if (buf == NULL) {
-      printf("Memory error for file %s.", filename);
-      return;
+      fprintf(stderr, "Memory error for file %s.", filename);
+      exit(4);
     }
 
     u_int32_t result = fread(buf, 1, file_size, file);
     if (result != file_size) {
-      printf("Read error for file %s.", filename);
-      return;
+      fprintf(stderr, "Read error for file %s.", filename);
+      exit(4);
     }
 
     EMAP map = {
@@ -474,6 +474,7 @@ typedef struct {
   architecture arch;
   const char *output;
   const char *input;
+  const char *tmp_dir;
 } Settings;
 
 static void iterdir_start(const Settings *const settings,
@@ -510,8 +511,6 @@ static const char *arch_string(architecture arch) {
   };
 }
 
-#define CEMBED_TMPDIR "cembed_tmp" // Temporary Directory
-
 int main(int argc, char *argv[]) {
 
   if (argc <= 1) {
@@ -520,7 +519,11 @@ int main(int argc, char *argv[]) {
   }
 
   static Settings settings = (Settings){
-      .arch = architecture_elf64_x86_64, .output = NULL, .input = NULL};
+      .arch = architecture_elf64_x86_64,
+      .output = NULL,
+      .input = NULL,
+      .tmp_dir = "cembed_tmp",
+  };
 
   GlobalThings things = (GlobalThings){
       .ms = NULL, .fs = NULL, .pos = 0, .hash_vec = {}, .dir_vec = {}};
@@ -552,6 +555,15 @@ int main(int argc, char *argv[]) {
       ++i;
 
       settings.output = next_arg;
+    } else if (strcmp(arg, "-t") == 0 || strcmp(arg, "--temp") == 0) {
+      if ((i + 1) >= (size_t)argc) {
+        fprintf(stderr, "Missing argument after %s\n", arg);
+        return 1;
+      }
+      const char *const next_arg = argv[i + 1];
+      ++i;
+
+      settings.tmp_dir = next_arg;
     } else {
       if (settings.input == NULL) {
         settings.input = arg;
@@ -585,23 +597,29 @@ int main(int argc, char *argv[]) {
 
   char fmt[CEMBED_MAXPATH] = {};
 
-  sprintf(fmt, "if [ ! -d %s ]; then mkdir %s; fi;", CEMBED_TMPDIR,
-          CEMBED_TMPDIR);
+  sprintf(fmt, "if [ ! -d %s ]; then mkdir %s; fi;", settings.tmp_dir,
+          settings.tmp_dir);
   system_checked(fmt);
 
   // Build the Mapping Structure and Virtual File System
 
-  things.ms = fopen("cembed.map", "wb");
-  things.fs = fopen("cembed.fs", "wb");
+  sprintf(fmt, "%s/cembed.map", settings.tmp_dir);
+  things.ms = fopen(fmt, "wb");
+  sprintf(fmt, "%s/cembed.fs", settings.tmp_dir);
+  things.fs = fopen(fmt, "wb");
 
   if (things.ms == NULL || things.fs == NULL) {
-    printf("Failed to initialize map and filesystem. Check permissions.");
-    return 0;
+    fprintf(stderr,
+            "Failed to initialize map and filesystem. Check permissions.\n");
+    return 1;
   }
 
   iterdir_start(&settings, &things);
 
+  fflush(things.ms);
   fclose(things.ms);
+
+  fflush(things.fs);
   fclose(things.fs);
   hash_vec_destroy(&(things.hash_vec));
   dir_vec_destroy(&(things.dir_vec));
@@ -609,38 +627,37 @@ int main(int argc, char *argv[]) {
   // Convert to Embeddable Symbols
 
   sprintf(fmt,
-          "objcopy -I binary -O %s "
-          "--redefine-sym _binary_cembed_map_start=cembed_map_start "
-          "--redefine-sym _binary_cembed_map_end=cembed_map_end "
-          "--redefine-sym _binary_cembed_map_size=cembed_map_size "
-          "cembed.map cembed.map.o",
-          arch_string(settings.arch));
+          "cd %s && objcopy -I binary -O %s "
+          "--redefine-sym _binary___cembed_map_start=cembed_map_start "
+          "--redefine-sym _binary___cembed_map_end=cembed_map_end "
+          "--redefine-sym _binary___cembed_map_size=cembed_map_size "
+          "./cembed.map ./cembed.map.o",
+          settings.tmp_dir, arch_string(settings.arch));
   system_checked(fmt);
 
-  sprintf(fmt, "mv cembed.map.o %s/cembed.map.o", CEMBED_TMPDIR);
+  sprintf(fmt, "rm %s/cembed.map", settings.tmp_dir);
   system_checked(fmt);
-  system_checked("rm cembed.map");
 
   sprintf(fmt,
-          "objcopy -I binary -O %s "
-          "--redefine-sym _binary_cembed_fs_start=cembed_fs_start "
-          "--redefine-sym _binary_cembed_fs_end=cembed_fs_end "
-          "--redefine-sym _binary_cembed_fs_size=cembed_fs_size "
-          "cembed.fs cembed.fs.o",
-          arch_string(settings.arch));
+          "cd %s && objcopy -I binary -O %s "
+          "--redefine-sym _binary___cembed_fs_start=cembed_fs_start "
+          "--redefine-sym _binary___cembed_fs_end=cembed_fs_end "
+          "--redefine-sym _binary___cembed_fs_size=cembed_fs_size "
+          "./cembed.fs ./cembed.fs.o",
+          settings.tmp_dir, arch_string(settings.arch));
   system_checked(fmt);
 
-  sprintf(fmt, "mv cembed.fs.o %s/cembed.fs.o", CEMBED_TMPDIR);
-  system_checked(fmt);
-  system_checked("rm cembed.fs");
-
-  sprintf(fmt, "ld -relocatable cembed_tmp/*.o -o %s", settings.output);
+  sprintf(fmt, "rm %s/cembed.fs", settings.tmp_dir);
   system_checked(fmt);
 
-  sprintf(fmt, "rm -rf %s", CEMBED_TMPDIR);
+  sprintf(fmt, "ld -relocatable %s/*.o -o %s", settings.tmp_dir,
+          settings.output);
   system_checked(fmt);
 
-  printf("Created final object file at: %s\n", settings.output);
+  sprintf(fmt, "rm -rf %s", settings.tmp_dir);
+  system_checked(fmt);
+
+  fprintf(stdout, "Created final object file at: %s\n", settings.output);
 
   return 0;
 }
