@@ -1,0 +1,78 @@
+
+#ifdef CEMBED_TRANSLATE
+#undef CEMBED_TRANSLATE
+#endif
+
+#include <c-embed.h>
+
+void write_impl(void *buf, size_t size);
+
+#define EMAXPATH 512
+
+void iterdir(const char *const dirname, int indent) {
+
+  char *fullpath = (char *)malloc(EMAXPATH * sizeof(char));
+
+  EFILE *eFile = eopen(dirname, "d");
+  if (eFile == NULL) {
+    eerror("Error opening directory");
+    exit(1);
+  }
+
+  while (true) {
+
+    edirent ent;
+
+    int result = ereaddir(eFile, &ent);
+
+    if (result == EREADDIR_FINISHED) {
+      break;
+    }
+
+    if (result != EERRCODE_SUCCESS) {
+      eerror("Error reading dir");
+      exit(1);
+    }
+
+    if (ent.type == EMAP_ENTRY_TYPE_FILE) {
+      strcpy(fullpath, dirname);
+      strcat(fullpath, "/");
+      strcat(fullpath, ent.name);
+      printf("%*sFILE: %s", indent, "", ent.name);
+    } else if (ent.type == EMAP_ENTRY_TYPE_DIR) {
+      strcpy(fullpath, dirname);
+      strcat(fullpath, "/");
+      strcat(fullpath, ent.name);
+      printf("%*sFOLDER: %s", indent, "", ent.name);
+      iterdir(fullpath, indent + 1);
+    } else {
+      strcpy(fullpath, dirname);
+      strcat(fullpath, "/");
+      strcat(fullpath, ent.name);
+      fprintf(stderr, "Ignored entry of type %d: %s\n", ent.type, fullpath);
+    }
+  }
+
+  eclose(eFile);
+}
+
+int main(void) {
+
+  EFILE *eFile = eopen("/", "r");
+
+  if (eFile == NULL) {
+    eerror("Error opening directory");
+    return 1;
+  }
+
+  int type = estreamtype(eFile);
+
+  if (type != EMAP_ENTRY_TYPE_DIR) {
+    fprintf(stderr, "Invalid type for the root directory: %d\n", type);
+    return 1;
+  }
+
+  eclose(eFile);
+
+  iterdir("/", 0);
+}

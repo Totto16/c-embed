@@ -1,5 +1,5 @@
 
-examples = ['0_fgets', '1_fread']
+examples = ['0_fgets', '1_fread','2_readdir']
 
 foreach example : examples
 

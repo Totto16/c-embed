@@ -28,13 +28,7 @@ typedef struct {
   HASH_VEC_ITEM *items;
 } HashVec;
 
-typedef struct {
-  hash_t hash;
-  size_t name_size;
-  const char *name;
-} FileVecEntry;
-
-typedef FileVecEntry FILE_VEC_ITEM;
+typedef DirEntryDynamic FILE_VEC_ITEM;
 
 typedef struct {
   size_t size;
@@ -259,7 +253,8 @@ static void add_file_to_dir(const char *parent_directory,
     DIR_VEC_ITEM *item = &(dir_vec->items[i]);
 
     if (item->hash == parent_dir_hash) {
-      FILE_VEC_ITEM file_entry = {entry_hash, .name_size = strlen(entry_name),
+      FILE_VEC_ITEM file_entry = {.properties =
+                                      (DirEntryProps){.hash = entry_hash},
                                   .name = strdup(entry_name)};
       file_vec_add(&(item->files), file_entry);
       return;
@@ -430,6 +425,47 @@ static bool is_directory(const char *file) {
   return false;
 }
 
+void process_dirs(GlobalThings *things) {
+  for (size_t i = 0; i < things->dir_vec.size; ++i) {
+    const DIR_VEC_ITEM *dir = &(things->dir_vec.items[i]);
+
+    size_t dir_size = 0;
+
+    for (size_t i = 0; i < dir->files.size; ++i) {
+      const FILE_VEC_ITEM *file = &(dir->files.items[i]);
+
+      cookie_t entry_cookie = DIR_ENTRY_COOKIE;
+      fwrite(&entry_cookie, sizeof(cookie_t), 1, things->fs);
+      dir_size += sizeof(cookie_t);
+
+      fwrite(&(file->properties), sizeof(DirEntryProps), 1, things->fs);
+      dir_size += sizeof(DirEntryProps);
+
+      const size_t name_size = strlen(file->name);
+
+      fwrite(file->name, name_size, 1, things->fs);
+
+      char null_seperator = '\0';
+      fwrite(&null_seperator, 1, 1, things->fs);
+
+      dir_size += name_size + 1;
+    }
+
+    EMAP_ENTRY entry = NEW_EMAP_ENTRY_DIR(dir_size);
+
+    EMAP map = {
+        .hash = dir->hash,
+        .pos = things->pos,
+        .entry = entry,
+    };
+
+    fwrite(&map, sizeof(map), 1,
+           things->ms); // Write Mapping Structure
+
+    things->pos += dir_size; // Shift the Index Position
+  }
+}
+
 typedef enum {
   architecture_elf64_x86_64 = 0,
 } architecture;
@@ -447,7 +483,7 @@ static void iterdir_start(const Settings *const settings,
     cembed(settings->input, settings->input, things, NULL, true, NULL);
     iterdir(settings->input, settings->input, things);
 
-    // TODO: process dirs
+    process_dirs(things);
     return;
   }
 

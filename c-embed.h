@@ -65,12 +65,34 @@ typedef struct EMAP_S { // Map Indexing Struct
   EMAP_ENTRY entry;
 } __attribute__((packed)) EMAP;
 
+typedef u_int8_t byte_t;
+
 typedef struct EFILE_S { // Virtual File Stream
-  char *pos;
-  char *end;
+  byte_t *pos;
+  byte_t *end;
   u_int32_t size;
   EMAP_ENTRY entry;
 } EFILE;
+
+typedef struct edirent_s {
+  u_int8_t type;
+  const char *name;
+} edirent;
+
+typedef struct {
+  hash_t hash;
+} DirEntryProps;
+
+typedef struct {
+  DirEntryProps properties;
+  const char *name;
+} DirEntryDynamic;
+
+// ([...('DirC').split("").map(a=>a.charCodeAt(0).toString(16)),
+// "0x"].reverse().join(""))
+#define DIR_ENTRY_COOKIE 0x43726944 ///< 'DirC'
+
+typedef u_int32_t cookie_t;
 
 // Error Handling
 
@@ -160,34 +182,48 @@ int eerrno_to_errno(int eerrno) {
 
 #ifndef CEMBED_BUILD
 
-extern char cembed_map_start; // Embedded Indexing Structure
-extern char cembed_map_end;
-extern char cembed_map_size;
+extern byte_t cembed_map_start; // Embedded Indexing Structure
+extern byte_t cembed_map_end;
+extern byte_t cembed_map_size;
 
-extern char cembed_fs_start; // Embedded Virtual File System
-extern char cembed_fs_end;
-extern char cembed_fs_size;
+extern byte_t cembed_fs_start; // Embedded Virtual File System
+extern byte_t cembed_fs_end;
+extern byte_t cembed_fs_size;
 
 EFILE *eopen(const char *file, const char *mode) {
 
+  int required_type = -1;
+
   if (strcmp(mode, "r") != 0) {
-    ethrow(EERRCODE_INVALID_MODE);
+    if (strcmp(mode, "d") == 0) {
+      required_type = EMAP_ENTRY_TYPE_DIR;
+    } else if (strcmp(mode, "f") == 0) {
+      required_type = EMAP_ENTRY_TYPE_FILE;
+    } else {
+      ethrow(EERRCODE_INVALID_MODE);
+    }
   }
 
   EMAP *map = (EMAP *)(&cembed_map_start);
-  const char *end = &cembed_map_end;
+  const byte_t *end = &cembed_map_end;
 
   if (map == NULL || end == NULL) {
     ethrow(EERRCODE_NOMAP);
   }
 
   const u_int32_t key = hash((char *)file);
-  while (((char *)map != end) && (map->hash != key)) {
+  while (((byte_t *)map != end) && (map->hash != key)) {
     map++;
   }
 
   if (map->hash != key) {
     ethrow(EERRCODE_NOFILE);
+  }
+
+  if (required_type >= 0) {
+    if (required_type != map->entry.type) {
+      ethrow(EERRCODE_INVALID_MODE);
+    }
   }
 
   EFILE *e = (EFILE *)malloc(sizeof(*e));
@@ -275,8 +311,83 @@ size_t eread(void *ptr, size_t size, size_t count, EFILE *stream) {
 
   memcpy(ptr, (void *)stream->pos, size * count);
 
+  stream->pos = stream->pos + (size * count);
+
   (eerrcode = (EERRCODE_SUCCESS));
   return count;
+}
+
+#define EREADDIR_FINISHED -1
+
+int ereaddir(EFILE *stream, edirent *ent) {
+  if (stream->entry.type != EMAP_ENTRY_TYPE_DIR) {
+    return EERRCODE_IS_FILE;
+  }
+
+  if (stream->end == stream->pos) {
+    return EREADDIR_FINISHED;
+  }
+
+  // The data stored inside the dir entry is dynamically sized
+  //  it is like this:
+  //  (<cookie_t> cookie | <DirEntryProps> props | char * ... )*
+
+  size_t remaining_size = (size_t)(stream->end - stream->pos);
+
+  if (remaining_size < sizeof(cookie_t)) {
+    return EERRCODE_INTERNAL_ERROR;
+  }
+
+  remaining_size -= sizeof(cookie_t);
+  cookie_t *entry_cookie = (cookie_t *)stream->pos;
+  stream->pos += sizeof(cookie_t);
+
+  if (*entry_cookie != DIR_ENTRY_COOKIE) {
+    return EERRCODE_INTERNAL_ERROR;
+  }
+
+  if (remaining_size < sizeof(DirEntryProps)) {
+    return EERRCODE_INTERNAL_ERROR;
+  }
+  remaining_size -= sizeof(DirEntryProps);
+  DirEntryProps *properties = (DirEntryProps *)stream->pos;
+  stream->pos += sizeof(DirEntryProps);
+
+  DirEntryProps props = *properties;
+
+  // find entry based on hash
+  EMAP *map = (EMAP *)(&cembed_map_start);
+  const byte_t *end = &cembed_map_end;
+
+  if (map == NULL || end == NULL) {
+    return EERRCODE_NOMAP;
+  }
+
+  while (((byte_t *)map != end) && (map->hash != props.hash)) {
+    map++;
+  }
+
+  if (map->hash != props.hash) {
+    return EERRCODE_NOFILE;
+  }
+
+  if (remaining_size < 1) {
+    return EERRCODE_INTERNAL_ERROR;
+  }
+
+  const char *const entry_name = (const char *)stream->pos;
+
+  for (size_t i = 0; remaining_size != 0; --remaining_size, ++i) {
+    char value = entry_name[i];
+
+    if (value == '\0') {
+      stream->pos += i + 1;
+      break;
+    }
+  }
+
+  *ent = (edirent){.name = entry_name, .type = map->entry.type};
+  return EERRCODE_SUCCESS;
 }
 
 int egetpos(EFILE *e, epos_t *pos) {
@@ -336,7 +447,10 @@ void erewind(EFILE *e) { e->pos = (e->end - e->size); }
 
 int eseek(EFILE *stream, long int offset, int origin) {
 
-  // TODO: validate seeks in directory streams
+  if (stream->entry.type != EMAP_ENTRY_TYPE_FILE) {
+    (eerrcode = (EERRCODE_INVALID_ARGUMENTS));
+    return -1;
+  }
 
   if (origin == SEEK_SET) {
     stream->pos = E_START(stream) + offset;
