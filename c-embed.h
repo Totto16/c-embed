@@ -88,6 +88,8 @@ EFILE *eopen(const char *file, const char *mode);
 
 void eclose(EFILE *e);
 
+size_t esize(EFILE *e);
+
 int estreamtype(EFILE *e);
 
 bool eeof(EFILE *e);
@@ -292,6 +294,8 @@ void eclose(EFILE *e) {
   free(e);
   e = NULL;
 }
+
+size_t esize(EFILE *e) { return e->size; }
 
 #define E_START(e) ((e)->end - (e)->size)
 
