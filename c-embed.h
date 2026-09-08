@@ -529,16 +529,19 @@ int eseek(EFILE *stream, long int offset, int origin) {
     // check if we landed on a valid directory entry
     const size_t remaining_size = (size_t)(stream->end - stream->pos);
 
-    if (remaining_size < sizeof(cookie_t)) {
-      (eerrcode = (EERRCODE_INTERNAL_ERROR));
-      return -1;
-    }
+    if (remaining_size != 0) {
 
-    const cookie_t *const entry_cookie = (cookie_t *)stream->pos;
+      if (remaining_size < sizeof(cookie_t)) {
+        (eerrcode = (EERRCODE_INTERNAL_ERROR));
+        return -1;
+      }
 
-    if (*entry_cookie != DIR_ENTRY_COOKIE) {
-      (eerrcode = (EERRCODE_INTERNAL_ERROR));
-      return -1;
+      const cookie_t *const entry_cookie = (cookie_t *)stream->pos;
+
+      if (*entry_cookie != DIR_ENTRY_COOKIE) {
+        (eerrcode = (EERRCODE_INTERNAL_ERROR));
+        return -1;
+      }
     }
 
   } else {
