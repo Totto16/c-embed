@@ -42,6 +42,7 @@ typedef struct EFILE_S EFILE; // Virtual File Stream
 
 typedef struct {
   u_int8_t type;
+  u_int32_t size;
   const char *name;
 } edirent;
 
@@ -434,8 +435,18 @@ int ereaddir(EFILE *stream, edirent *ent) {
       break;
     }
   }
+  u_int32_t size;
 
-  *ent = (edirent){.type = map->entry.type, .name = entry_name};
+  if (map->entry.type == EMAP_ENTRY_TYPE_FILE) {
+    size = map->entry.data.file.file_size;
+  } else if (map->entry.type == EMAP_ENTRY_TYPE_DIR) {
+    size = map->entry.data.dir.file_array_size;
+  } else {
+    stream->pos = original_pos;
+    return EERRCODE_INTERNAL_ERROR;
+  }
+
+  *ent = (edirent){.type = map->entry.type, .size = size, .name = entry_name};
   return EERRCODE_SUCCESS;
 }
 
