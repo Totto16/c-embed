@@ -383,7 +383,7 @@ int ereaddir(EFILE *stream, edirent *ent) {
   byte_t *const original_pos = stream->pos;
 
   remaining_size -= sizeof(cookie_t);
-  cookie_t *entry_cookie = (cookie_t *)stream->pos;
+  const cookie_t *const entry_cookie = (cookie_t *)stream->pos;
   stream->pos += sizeof(cookie_t);
 
   if (*entry_cookie != DIR_ENTRY_COOKIE) {
@@ -396,7 +396,7 @@ int ereaddir(EFILE *stream, edirent *ent) {
     return EERRCODE_INTERNAL_ERROR;
   }
   remaining_size -= sizeof(DirEntryProps);
-  DirEntryProps *properties = (DirEntryProps *)stream->pos;
+  const DirEntryProps *const properties = (DirEntryProps *)stream->pos;
   stream->pos += sizeof(DirEntryProps);
 
   DirEntryProps props = *properties;
@@ -496,11 +496,6 @@ void erewind(EFILE *e) { e->pos = (e->end - e->size); }
 
 int eseek(EFILE *stream, long int offset, int origin) {
 
-  if (stream->entry.type != EMAP_ENTRY_TYPE_FILE) {
-    (eerrcode = (EERRCODE_INVALID_ARGUMENTS));
-    return -1;
-  }
-
   if (origin == SEEK_SET) {
     stream->pos = E_START(stream) + offset;
   } else if (origin == SEEK_CUR) {
@@ -514,6 +509,29 @@ int eseek(EFILE *stream, long int offset, int origin) {
 
   if (stream->end < stream->pos || etell(stream) < 0) {
     (eerrcode = (EERRCODE_OOBSTREAMPOS));
+    return -1;
+  }
+
+  if (stream->entry.type == EMAP_ENTRY_TYPE_FILE) {
+    // ok, no extra check needed
+  } else if (stream->entry.type == EMAP_ENTRY_TYPE_DIR) {
+    // check if we landed on a valid directory entry
+    const size_t remaining_size = (size_t)(stream->end - stream->pos);
+
+    if (remaining_size < sizeof(cookie_t)) {
+      (eerrcode = (EERRCODE_INTERNAL_ERROR));
+      return -1;
+    }
+
+    const cookie_t *const entry_cookie = (cookie_t *)stream->pos;
+
+    if (*entry_cookie != DIR_ENTRY_COOKIE) {
+      (eerrcode = (EERRCODE_INTERNAL_ERROR));
+      return -1;
+    }
+
+  } else {
+    (eerrcode = (EERRCODE_INVALID_ARGUMENTS));
     return -1;
   }
 
