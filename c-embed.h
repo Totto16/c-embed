@@ -380,15 +380,19 @@ int ereaddir(EFILE *stream, edirent *ent) {
     return EERRCODE_INTERNAL_ERROR;
   }
 
+  byte_t *const original_pos = stream->pos;
+
   remaining_size -= sizeof(cookie_t);
   cookie_t *entry_cookie = (cookie_t *)stream->pos;
   stream->pos += sizeof(cookie_t);
 
   if (*entry_cookie != DIR_ENTRY_COOKIE) {
+    stream->pos = original_pos;
     return EERRCODE_INTERNAL_ERROR;
   }
 
   if (remaining_size < sizeof(DirEntryProps)) {
+    stream->pos = original_pos;
     return EERRCODE_INTERNAL_ERROR;
   }
   remaining_size -= sizeof(DirEntryProps);
@@ -402,6 +406,7 @@ int ereaddir(EFILE *stream, edirent *ent) {
   const byte_t *end = &cembed_map_end;
 
   if (map == NULL || end == NULL) {
+    stream->pos = original_pos;
     return EERRCODE_NOMAP;
   }
 
@@ -410,10 +415,12 @@ int ereaddir(EFILE *stream, edirent *ent) {
   }
 
   if (map->hash != props.hash) {
+    stream->pos = original_pos;
     return EERRCODE_NOFILE;
   }
 
   if (remaining_size < 1) {
+    stream->pos = original_pos;
     return EERRCODE_INTERNAL_ERROR;
   }
 
